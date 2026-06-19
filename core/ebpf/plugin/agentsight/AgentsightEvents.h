@@ -55,8 +55,7 @@ public:
     std::string mModel;
     std::string mFinishReason;
     std::string mRequestMessagesJson;
-    // Incremental ("latest round") input messages: system messages dropped and only the
-    // messages from the last `user` message onward are kept. Maps to AgentsightLLMData.input_message_delta.
+    // Incremental input messages are computed in AgentsightManager from mRequestMessagesJson.
     std::string mInputMessageDeltaJson;
     std::string mResponseMessagesJson;
     std::string mToolDefinitionsJson;
