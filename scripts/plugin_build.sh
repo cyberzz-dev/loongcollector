@@ -42,6 +42,7 @@ OS_FLAG=$?
 ROOTDIR=$(cd $(dirname "${BASH_SOURCE[0]}") && cd .. && pwd)
 CURRDIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 mkdir -p "$ROOTDIR"/bin
+mkdir -p "$ROOTDIR/$OUT_DIR"
 
 if [ $OS_FLAG = 1 ]; then
   if uname -m | grep x86_64; then

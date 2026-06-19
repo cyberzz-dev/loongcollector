@@ -46,6 +46,10 @@ WITHSPL=${WITHSPL:-ON}
 # Passed to core CMake; coolbpf must expose target libagentsight when enabled.
 # gen_copy_docker: libcoolbpf.so.* and libagentsight.so are under /opt/logtail/deps/lib (cmake --install prefix; core/dependencies.cmake DEPS_ROOT).
 ENABLE_AGENTSIGHT=${ENABLE_AGENTSIGHT:-ON}
+PLUGIN_BASE_SO=libGoPluginBase.so
+if [ "${ENABLE_CORP_FEATURE:-}" = "ON" ]; then
+  PLUGIN_BASE_SO=libPluginBase.so
+fi
 BUILD_SCRIPT_FILE=$GENERATED_HOME/gen_build.sh
 COPY_SCRIPT_FILE=$GENERATED_HOME/gen_copy_docker.sh
 MAKE_JOBS=${MAKE_JOBS:-$(nproc)}
@@ -76,6 +80,10 @@ EOF
       echo "go env -w $v" >> $BUILD_SCRIPT_FILE
     done
   fi
+
+  env | grep -E '^(CARGO_HTTP_|CARGO_NET_|CARGO_REGISTRIES_CRATES_IO_|CARGO_SOURCE_)' | while IFS='=' read -r k v; do
+    printf 'export %s=%q\n' "$k" "$v" >> $BUILD_SCRIPT_FILE
+  done
 
   if [ $COPY_GIT_CONFIGS = "true" ]; then
     globalUrlConfigs=($(git config -l --global 2>/dev/null | grep -E '^url\.'||true))
@@ -127,7 +135,7 @@ function generateCopyScript() {
   echo "id=\$(docker create ${REPOSITORY}:${VERSION})" >>$COPY_SCRIPT_FILE
 
   if [ $CATEGORY = "plugin" ]; then
-    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/libGoPluginBase.so $BINDIR' >>$COPY_SCRIPT_FILE
+    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/'${PLUGIN_BASE_SO}' $BINDIR' >>$COPY_SCRIPT_FILE
   elif [ $CATEGORY = "core" ]; then
     if [ $BUILD_LOGTAIL = "ON" ]; then
       echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/loongcollector $BINDIR' >>$COPY_SCRIPT_FILE
@@ -146,7 +154,7 @@ function generateCopyScript() {
       echo 'rm -rf core/protobuf/forward && docker cp "$id":'${PATH_IN_DOCKER}'/core/protobuf/forward core/protobuf/forward' >>$COPY_SCRIPT_FILE
     fi
   else
-    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/libGoPluginBase.so $BINDIR' >>$COPY_SCRIPT_FILE
+    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/'${PLUGIN_BASE_SO}' $BINDIR' >>$COPY_SCRIPT_FILE
     echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/loongcollector $BINDIR' >>$COPY_SCRIPT_FILE
     echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/go_pipeline/libGoPluginAdapter.so $BINDIR' >>$COPY_SCRIPT_FILE
     echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/ebpf/driver/libeBPFDriver.so $BINDIR' >>$COPY_SCRIPT_FILE
