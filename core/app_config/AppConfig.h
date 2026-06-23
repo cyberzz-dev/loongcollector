@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -110,7 +111,8 @@ private:
     std::unordered_map<std::string, std::string> mEnvConfigKeyToConfigName;
     std::unordered_map<std::string, std::string> mRemoteInstanceConfigKeyToConfigName;
 
-    std::map<std::string, std::function<bool()>*> mCallbacks;
+    std::map<std::string, std::vector<std::function<bool()>*>> mCallbacks;
+    std::function<bool()> mResourceConfCallback;
 
     DoubleBuffer<std::vector<sls_logs::LogTag>> mFileTags;
     std::string mFileTagsDir;
@@ -289,6 +291,8 @@ private:
      * @param confJson json value to load from
      */
     void LoadResourceConf(const Json::Value& confJson);
+    bool LoadDynamicResourceConf();
+    void AdjustSendRequestConcurrency();
     void LoadOtherConf(const Json::Value& confJson);
     // void LoadGlobalFuseConf(const Json::Value& confJson);
     void SetIlogtailConfigJson(const std::string& configJson) {

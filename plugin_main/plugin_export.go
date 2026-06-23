@@ -212,6 +212,18 @@ func ProcessPipelineEventGroup(configName string, pbBytes []byte, packID string)
 	return config.ProcessPipelineEventGroup(pbBytes, util.StringDeepCopy(packID))
 }
 
+//export ProcessLogGroup
+func ProcessLogGroup(configName string, logBytes []byte, packID string) int {
+	pluginmanager.LogtailConfigLock.RLock()
+	config, flag := pluginmanager.LogtailConfig[configName]
+	pluginmanager.LogtailConfigLock.RUnlock()
+	if !flag {
+		logger.Critical(context.Background(), selfmonitor.PluginAlarm, "config not found", configName)
+		return -1
+	}
+	return config.ProcessLogGroup(logBytes, util.StringDeepCopy(packID))
+}
+
 //export StopAllPipelines
 func StopAllPipelines(withInputFlag int) {
 	logger.Info(context.Background(), "Stop all", "start", "with input", withInputFlag)

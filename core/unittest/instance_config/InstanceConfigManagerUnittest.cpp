@@ -101,7 +101,10 @@ void InstanceConfigManagerUnittest::TestUpdateInstanceConfigs() {
         InstanceConfigDiff configDiff;
         {
             std::string content = R"({
-                "max_bytes_per_sec": 1234
+                "max_bytes_per_sec": 1234,
+                "cpu_usage_limit": 4,
+                "mem_usage_limit": 8192,
+                "send_request_concurrency": 50
             })";
             std::string errorMsg;
             Json::Value detail;
@@ -148,6 +151,10 @@ void InstanceConfigManagerUnittest::TestUpdateInstanceConfigs() {
         APSARA_TEST_EQUAL(nullptr, InstanceConfigManager::GetInstance()->FindConfigByName("test3"));
     }
     APSARA_TEST_EQUAL(kDefaultMaxSendBytePerSec, AppConfig::GetInstance()->GetMaxBytePerSec());
+    APSARA_TEST_EQUAL(4.0F, AppConfig::GetInstance()->GetCpuUsageUpLimit());
+    APSARA_TEST_EQUAL(8192, AppConfig::GetInstance()->GetMemUsageUpLimit());
+    APSARA_TEST_EQUAL(50, AppConfig::GetInstance()->GetSendRequestConcurrency());
+    APSARA_TEST_EQUAL(75, AppConfig::GetInstance()->GetSendRequestGlobalConcurrency());
     APSARA_TEST_EQUAL(true, FlusherRunner::GetInstance()->mEnableRateLimiter);
     // Modified
     status = 1;
@@ -155,7 +162,10 @@ void InstanceConfigManagerUnittest::TestUpdateInstanceConfigs() {
         InstanceConfigDiff configDiff;
         {
             std::string content = R"({
-                "max_bytes_per_sec": 31457280
+                "max_bytes_per_sec": 31457280,
+                "cpu_usage_limit": 5.5,
+                "mem_usage_limit": 4096,
+                "send_request_concurrency": 100
             })";
             std::string errorMsg;
             Json::Value detail;
@@ -202,6 +212,10 @@ void InstanceConfigManagerUnittest::TestUpdateInstanceConfigs() {
         APSARA_TEST_EQUAL(nullptr, InstanceConfigManager::GetInstance()->FindConfigByName("test3"));
     }
     APSARA_TEST_EQUAL(31457280, AppConfig::GetInstance()->GetMaxBytePerSec());
+    APSARA_TEST_EQUAL(5.5F, AppConfig::GetInstance()->GetCpuUsageUpLimit());
+    APSARA_TEST_EQUAL(4096, AppConfig::GetInstance()->GetMemUsageUpLimit());
+    APSARA_TEST_EQUAL(MAX_SEND_REQUEST_CONCURRENCY, AppConfig::GetInstance()->GetSendRequestConcurrency());
+    APSARA_TEST_EQUAL(120, AppConfig::GetInstance()->GetSendRequestGlobalConcurrency());
     APSARA_TEST_EQUAL(false, FlusherRunner::GetInstance()->mEnableRateLimiter);
     // Removed
     status = 2;

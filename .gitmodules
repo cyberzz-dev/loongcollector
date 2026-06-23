@@ -4,3 +4,6 @@
 [submodule "core/_thirdparty/DCGM"]
 	path = core/_thirdparty/DCGM
 	url = https://github.com/NVIDIA/DCGM.git
+[submodule "libbpf"]
+	path = libbpf
+	url = https://github.com/libbpf/libbpf.git

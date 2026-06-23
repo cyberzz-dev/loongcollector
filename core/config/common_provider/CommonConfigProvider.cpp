@@ -47,6 +47,15 @@ const string AGENT = "/Agent";
 
 string CommonConfigProvider::configVersion = "version";
 
+namespace {
+string DumpRemoteConfigDetail(const Json::Value& detail) {
+    Json::StreamWriterBuilder builder;
+    builder["precision"] = 16;
+    builder["precisionType"] = "significant";
+    return Json::writeString(builder, detail);
+}
+} // namespace
+
 void CommonConfigProvider::Init(const string& dir) {
     sName = "common config provider";
 
@@ -438,7 +447,7 @@ bool CommonConfigProvider::DumpConfigFile(const configserver::proto::v2::ConfigD
         return false;
     }
     detail[CommonConfigProvider::configVersion] = config.version();
-    string configDetail = detail.toStyledString();
+    string configDetail = DumpRemoteConfigDetail(detail);
     {
         ofstream fout(tmpFilePath);
         if (!fout) {

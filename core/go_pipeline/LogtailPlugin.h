@@ -156,6 +156,7 @@ typedef void (*StopBuiltInModulesFun)();
 typedef void (*StartFun)(GoString);
 typedef GoInt (*InitPluginBaseFun)();
 typedef GoInt (*InitPluginBaseV2Fun)(GoString cfg);
+typedef GoInt (*ProcessLogGroupFun)(GoString c, GoSlice l, GoString p);
 typedef GoInt (*ProcessPipelineEventGroupFun)(GoString c, GoSlice l, GoString p);
 typedef struct innerContainerMeta* (*GetContainerMetaFun)(GoString containerID);
 typedef char* (*GetAllContainerMetaFun)();
@@ -236,6 +237,7 @@ public:
 
     bool IsPluginOpened() { return mPluginValid; }
 
+    void ProcessLogGroup(const std::string& configName, const std::string& logGroup, const std::string& packId);
     void ProcessPipelineEventGroup(const std::string& configName,
                                    const std::string& pipelineEventGroup,
                                    const std::string& packId);
@@ -292,6 +294,7 @@ private:
     StartFun mStartFun;
     volatile bool mPluginValid;
     logtail::FlusherSLS mPluginContainerConfig;
+    ProcessLogGroupFun mProcessLogGroupFun;
     ProcessPipelineEventGroupFun mProcessPipelineEventGroupFun;
     GetContainerMetaFun mGetContainerMetaFun;
     GetAllContainerMetaFun mGetAllContainerMetaFun;

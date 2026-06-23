@@ -46,10 +46,6 @@ WITHSPL=${WITHSPL:-ON}
 # Passed to core CMake; coolbpf must expose target libagentsight when enabled.
 # gen_copy_docker: libcoolbpf.so.* and libagentsight.so are under /opt/logtail/deps/lib (cmake --install prefix; core/dependencies.cmake DEPS_ROOT).
 ENABLE_AGENTSIGHT=${ENABLE_AGENTSIGHT:-ON}
-PLUGIN_BASE_SO=libGoPluginBase.so
-if [ "${ENABLE_CORP_FEATURE:-}" = "ON" ]; then
-  PLUGIN_BASE_SO=libPluginBase.so
-fi
 BUILD_SCRIPT_FILE=$GENERATED_HOME/gen_build.sh
 COPY_SCRIPT_FILE=$GENERATED_HOME/gen_copy_docker.sh
 MAKE_JOBS=${MAKE_JOBS:-$(nproc)}
@@ -81,10 +77,6 @@ EOF
     done
   fi
 
-  env | grep -E '^(CARGO_HTTP_|CARGO_NET_|CARGO_REGISTRIES_CRATES_IO_|CARGO_SOURCE_)' | while IFS='=' read -r k v; do
-    printf 'export %s=%q\n' "$k" "$v" >> $BUILD_SCRIPT_FILE
-  done
-
   if [ $COPY_GIT_CONFIGS = "true" ]; then
     globalUrlConfigs=($(git config -l --global 2>/dev/null | grep -E '^url\.'||true))
     for gc in ${globalUrlConfigs[@]:-}; do
@@ -115,17 +107,6 @@ AGENTSIGHT_BUILD_DEPS_EOF
   elif [ $CATEGORY = "e2e" ]; then
     echo "mkdir -p core/build && cd core/build && cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DLOGTAIL_VERSION=${VERSION} -DBUILD_LOGTAIL_UT=${BUILD_LOGTAIL_UT} -DENABLE_COMPATIBLE_MODE=${ENABLE_COMPATIBLE_MODE} -DENABLE_STATIC_LINK_CRT=${ENABLE_STATIC_LINK_CRT} -DWITHOUTGDB=${WITHOUTGDB} -DENABLE_AGENTSIGHT=${ENABLE_AGENTSIGHT} .. && make -sj\$nproc && cd - && ./scripts/plugin_build.sh mod c-shared ${OUT_DIR} ${VERSION} ${PLUGINS_CONFIG_FILE} ${GO_MOD_FILE}" >>$BUILD_SCRIPT_FILE
   fi
-
-  # When BUILD_LOGTAIL_UT=ON, gen_copy_docker.sh copies the entire core/build tree for UT binaries,
-  # so skip cleanup. Otherwise, remove C++ intermediate artifacts (*.o, CMakeFiles) before Docker
-  # commits the layer — this is the main cause of the slow "COMMIT镜像" step at the end of docker build.
-  if [[ "${CATEGORY}" != "plugin" ]] && [[ "${BUILD_LOGTAIL_UT}" != "ON" ]]; then
-    cat >>"$BUILD_SCRIPT_FILE" <<'CLEANUP_EOF'
-# Remove C++ intermediate build artifacts to reduce Docker layer commit size
-find core/build -name "*.o" -delete 2>/dev/null || true
-find core/build -type d -name "CMakeFiles" | xargs rm -rf 2>/dev/null || true
-CLEANUP_EOF
-  fi
 }
 
 function generateCopyScript() {
@@ -135,7 +116,7 @@ function generateCopyScript() {
   echo "id=\$(docker create ${REPOSITORY}:${VERSION})" >>$COPY_SCRIPT_FILE
 
   if [ $CATEGORY = "plugin" ]; then
-    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/'${PLUGIN_BASE_SO}' $BINDIR' >>$COPY_SCRIPT_FILE
+    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/libGoPluginBase.so $BINDIR' >>$COPY_SCRIPT_FILE
   elif [ $CATEGORY = "core" ]; then
     if [ $BUILD_LOGTAIL = "ON" ]; then
       echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/loongcollector $BINDIR' >>$COPY_SCRIPT_FILE
@@ -154,7 +135,7 @@ function generateCopyScript() {
       echo 'rm -rf core/protobuf/forward && docker cp "$id":'${PATH_IN_DOCKER}'/core/protobuf/forward core/protobuf/forward' >>$COPY_SCRIPT_FILE
     fi
   else
-    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/'${PLUGIN_BASE_SO}' $BINDIR' >>$COPY_SCRIPT_FILE
+    echo 'docker cp "$id":'${PATH_IN_DOCKER}'/'${OUT_DIR}'/libGoPluginBase.so $BINDIR' >>$COPY_SCRIPT_FILE
     echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/loongcollector $BINDIR' >>$COPY_SCRIPT_FILE
     echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/go_pipeline/libGoPluginAdapter.so $BINDIR' >>$COPY_SCRIPT_FILE
     echo 'docker cp "$id":'${PATH_IN_DOCKER}'/core/build/ebpf/driver/libeBPFDriver.so $BINDIR' >>$COPY_SCRIPT_FILE

@@ -127,6 +127,8 @@ public:
     void TestGetConfigUpdateAndConfigWatcher();
 
     void TestLoadConfigFileOnetimeRecovery();
+
+    void TestDumpConfigFileUsesReadableFloatPrecision();
 };
 
 void CommonConfigProviderUnittest::TestInit() {
@@ -281,6 +283,29 @@ void CommonConfigProviderUnittest::TestInit() {
 
         provider.Stop();
     }
+}
+
+void CommonConfigProviderUnittest::TestDumpConfigFileUsesReadableFloatPrecision() {
+    MockCommonConfigProvider provider;
+    provider.Init("common_v2");
+    provider.Stop();
+
+    configserver::proto::v2::ConfigDetail config;
+    config.set_name("resource_limits_1");
+    config.set_version(1782200681721);
+    config.set_detail(R"({
+        "cpu_usage_limit": 0.10000000000000001,
+        "mem_usage_limit": 8192
+    })");
+
+    APSARA_TEST_TRUE(provider.DumpConfigFile(config, provider.mInstanceSourceDir));
+
+    ifstream fin((provider.mInstanceSourceDir / "resource_limits_1.json").string());
+    APSARA_TEST_TRUE(fin.good());
+    string content((istreambuf_iterator<char>(fin)), istreambuf_iterator<char>());
+    APSARA_TEST_NOT_EQUAL(string::npos, content.find("\"cpu_usage_limit\" : 0.1"));
+    APSARA_TEST_EQUAL(string::npos, content.find("0.10000000000000001"));
+    APSARA_TEST_NOT_EQUAL(string::npos, content.find("\"version\" : 1782200681721"));
 }
 
 void CommonConfigProviderUnittest::TestGetConfigUpdateAndConfigWatcher() {
@@ -807,6 +832,7 @@ void CommonConfigProviderUnittest::TestLoadConfigFileOnetimeRecovery() {
 UNIT_TEST_CASE(CommonConfigProviderUnittest, TestInit)
 UNIT_TEST_CASE(CommonConfigProviderUnittest, TestGetConfigUpdateAndConfigWatcher)
 UNIT_TEST_CASE(CommonConfigProviderUnittest, TestLoadConfigFileOnetimeRecovery)
+UNIT_TEST_CASE(CommonConfigProviderUnittest, TestDumpConfigFileUsesReadableFloatPrecision)
 
 }; // namespace logtail
 

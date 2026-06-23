@@ -636,6 +636,11 @@ AppConfig::AppConfig() {
 
     mPurageContainerMode = false;
     mForceQuitReadTimeout = 7200;
+    mResourceConfCallback = [this]() { return LoadDynamicResourceConf(); };
+    RegisterCallback("cpu_usage_limit", &mResourceConfCallback);
+    RegisterCallback("mem_usage_limit", &mResourceConfCallback);
+    RegisterCallback("max_bytes_per_sec", &mResourceConfCallback);
+    RegisterCallback("send_request_concurrency", &mResourceConfCallback);
     LoadEnvTags();
     CheckPurageContainerMode();
 }
@@ -858,6 +863,28 @@ void AppConfig::LoadEnvResourceLimit() {
     LoadSingleValueEnvConfig("max_bytes_per_sec", mMaxBytePerSec, (int32_t)(1024 * 1024));
     LoadSingleValueEnvConfig("process_thread_count", mProcessThreadCount, (int32_t)1);
     LoadSingleValueEnvConfig("send_request_concurrency", mSendRequestConcurrency, (int32_t)10);
+}
+
+bool AppConfig::LoadDynamicResourceConf() {
+    auto ValidatePositiveDouble = [](const std::string&, const double value) -> bool { return value > 0; };
+    auto ValidatePositiveInt64 = [](const std::string&, const int64_t value) -> bool { return value > 0; };
+    auto ValidateMaxBytePerSec = [](const std::string&, const int32_t value) -> bool {
+        return value >= static_cast<int32_t>(1024 * 1024);
+    };
+    auto ValidateSendRequestConcurrency = [](const std::string&, const int32_t value) -> bool { return value > 0; };
+
+    mCpuUsageUpLimit = static_cast<float>(MergeDouble(
+        DOUBLE_FLAG(cpu_usage_up_limit), mCpuUsageUpLimit, "cpu_usage_limit", ValidatePositiveDouble));
+    mMemUsageUpLimit
+        = MergeInt64(INT64_FLAG(memory_usage_up_limit), mMemUsageUpLimit, "mem_usage_limit", ValidatePositiveInt64);
+    mMaxBytePerSec = MergeInt32(
+        kDefaultMaxSendBytePerSec, mMaxBytePerSec, "max_bytes_per_sec", ValidateMaxBytePerSec);
+    mSendRequestConcurrency = MergeInt32(INT32_FLAG(send_request_concurrency),
+                                         mSendRequestConcurrency,
+                                         "send_request_concurrency",
+                                         ValidateSendRequestConcurrency);
+    AdjustSendRequestConcurrency();
+    return true;
 }
 
 /**
@@ -1196,7 +1223,10 @@ void AppConfig::LoadResourceConf(const Json::Value& confJson) {
         LOG_INFO(sLogger, ("bind_interface", mBindInterface));
     }
 
-    // mSendRequestConcurrency was limited
+    AdjustSendRequestConcurrency();
+}
+
+void AppConfig::AdjustSendRequestConcurrency() {
     if (mSendRequestConcurrency < MIN_SEND_REQUEST_CONCURRENCY) {
         mSendRequestConcurrency = MIN_SEND_REQUEST_CONCURRENCY;
     }
@@ -1793,8 +1823,8 @@ void AppConfig::LoadInstanceConfig(const std::map<std::string, std::shared_ptr<I
                  ("load all local instanceConfig", localInstanceConfig.toStyledString())(
                      "load all remote instanceConfig", remoteInstanceConfig.toStyledString()));
         std::set<std::function<bool()>*> callbackCall;
-        for (const auto& callback : mCallbacks) {
-            const std::string& key = callback.first;
+        for (const auto& callbacks : mCallbacks) {
+            const std::string& key = callbacks.first;
             bool configChanged = false;
             // 检查本地配置是否发生变化
             if (localInstanceConfig.isMember(key) != mLocalInstanceConfig.isMember(key)
@@ -1809,7 +1839,7 @@ void AppConfig::LoadInstanceConfig(const std::map<std::string, std::shared_ptr<I
                 configChanged = true;
             }
             if (configChanged) {
-                callbackCall.insert(callback.second);
+                callbackCall.insert(callbacks.second.begin(), callbacks.second.end());
             }
         }
         mLocalInstanceConfig = std::move(localInstanceConfig);
@@ -1821,7 +1851,10 @@ void AppConfig::LoadInstanceConfig(const std::map<std::string, std::shared_ptr<I
 }
 
 void AppConfig::RegisterCallback(const std::string& key, std::function<bool()>* callback) {
-    mCallbacks[key] = callback;
+    auto& callbacks = mCallbacks[key];
+    if (std::find(callbacks.begin(), callbacks.end(), callback) == callbacks.end()) {
+        callbacks.push_back(callback);
+    }
 }
 
 template <typename T>
@@ -1891,7 +1924,7 @@ void tryMerge(const std::string& name,
               std::unordered_map<std::string, std::string>& keyToConfigName,
               double& res,
               std::string& configName) {
-    if (config[name].isDouble() && validateFn(name, config[name].asDouble())) {
+    if ((config[name].isDouble() || config[name].isIntegral()) && validateFn(name, config[name].asDouble())) {
         res = config[name].asDouble();
         configName = keyToConfigName[name];
     }

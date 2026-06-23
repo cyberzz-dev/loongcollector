@@ -420,6 +420,11 @@ bool LogtailPlugin::LoadPluginBase() {
             return mPluginValid;
         }
         // C++传递单条数据到golang插件
+        mProcessLogGroupFun = (ProcessLogGroupFun)loader.LoadMethod("ProcessLogGroup", error);
+        if (!error.empty()) {
+            LOG_ERROR(sLogger, ("load ProcessLogGroup error, Message", error));
+            return mPluginValid;
+        }
         mProcessPipelineEventGroupFun
             = (ProcessPipelineEventGroupFun)loader.LoadMethod("ProcessPipelineEventGroup", error);
         if (!error.empty()) {
@@ -468,6 +473,33 @@ bool LogtailPlugin::LoadPluginBase() {
     return mPluginValid;
 }
 
+
+void LogtailPlugin::ProcessLogGroup(const std::string& configName,
+                                    const std::string& logGroup,
+                                    const std::string& packId) {
+#ifndef APSARA_UNIT_TEST_MAIN
+    if (logGroup.empty() || !(mPluginValid && mProcessLogGroupFun != NULL)) {
+        return;
+    }
+    std::string realConfigName = configName + "/2";
+    std::string packIdPrefix = ToHexString(HashString(packId));
+    GoString goConfigName;
+    GoSlice goLog;
+    GoString goPackId;
+    goConfigName.n = realConfigName.size();
+    goConfigName.p = realConfigName.c_str();
+    goPackId.n = packIdPrefix.size();
+    goPackId.p = packIdPrefix.c_str();
+    goLog.len = goLog.cap = logGroup.length();
+    goLog.data = (void*)logGroup.c_str();
+    GoInt rst = mProcessLogGroupFun(goConfigName, goLog, goPackId);
+    if (rst != (GoInt)0) {
+        LOG_WARNING(sLogger, ("process loggroup error", configName)("result", rst));
+    }
+#else
+    LogtailPluginMock::GetInstance()->ProcessLogGroup(configName, logGroup, packId);
+#endif
+}
 
 void LogtailPlugin::ProcessPipelineEventGroup(const std::string& configName,
                                               const std::string& pipelineEventGroup,

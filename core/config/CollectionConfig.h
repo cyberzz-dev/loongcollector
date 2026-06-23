@@ -26,6 +26,7 @@
 
 #include "json/json.h"
 
+#include "collection_pipeline/GoPipelineBridgeMode.h"
 #include "config/PipelineConfig.h"
 
 namespace logtail {
@@ -70,6 +71,10 @@ struct CollectionConfig : public PipelineConfig {
 
     bool IsFlushingThroughGoPipelineExisted() const {
         return mHasGoFlusher || ShouldNativeFlusherConnectedByGoPipeline();
+    }
+
+    GoPipelineBridgeMode GetGoPipelineBridgeMode() const {
+        return mHasSelfMonitorInput ? GoPipelineBridgeMode::PipelineEventGroup : GoPipelineBridgeMode::LogGroup;
     }
 
     bool ShouldAddProcessorTagNative() const { return mHasNativeProcessor || (mHasNativeInput && !mHasGoProcessor); }

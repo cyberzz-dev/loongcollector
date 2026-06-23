@@ -251,6 +251,20 @@ func (lc *LogstoreConfig) ProcessPipelineEventGroup(pbBytes []byte, packID strin
 	return -1
 }
 
+func (lc *LogstoreConfig) ProcessLogGroup(logByte []byte, packID string) int {
+	logGroup := &protocol.LogGroup{}
+	err := logGroup.Unmarshal(logByte)
+	if err != nil {
+		logger.Error(lc.Context.GetRuntimeContext(), selfmonitor.WrongProtobufAlarm, "cannot process log group passed by core, err", err)
+		return -1
+	}
+	lc.PluginRunner.ReceiveLogGroup(pipeline.LogGroupWithContext{
+		LogGroup: logGroup,
+		Context:  map[string]interface{}{ctxKeySource: packID}},
+	)
+	return 0
+}
+
 func hasDockerStdoutInput(plugins map[string]interface{}) bool {
 	inputs, exists := plugins["inputs"]
 	if !exists {

@@ -22,6 +22,7 @@
 
 #include "json/json.h"
 
+#include "collection_pipeline/GoPipelineBridgeMode.h"
 #include "collection_pipeline/GlobalConfig.h"
 #include "collection_pipeline/queue/QueueKey.h"
 #include "logger/Logger.h"
@@ -78,6 +79,8 @@ public:
     void SetHasNativeProcessorsFlag(bool flag) { mHasNativeProcessors = flag; }
     bool IsFlushingThroughGoPipeline() const { return mIsFlushingThroughGoPipeline; }
     void SetIsFlushingThroughGoPipelineFlag(bool flag) { mIsFlushingThroughGoPipeline = flag; }
+    GoPipelineBridgeMode GetGoPipelineBridgeMode() const { return mGoPipelineBridgeMode; }
+    void SetGoPipelineBridgeMode(GoPipelineBridgeMode mode) { mGoPipelineBridgeMode = mode; }
 
     const Logger::logger& GetLogger() const { return mLogger; }
     AlarmManager& GetAlarm() const { return *mAlarm; };
@@ -100,6 +103,7 @@ private:
     bool mEnableExactlyOnce = false;
     bool mHasNativeProcessors = false;
     bool mIsFlushingThroughGoPipeline = false;
+    GoPipelineBridgeMode mGoPipelineBridgeMode = GoPipelineBridgeMode::LogGroup;
 
     Logger::logger mLogger = sLogger;
     AlarmManager* mAlarm = AlarmManager::GetInstance();

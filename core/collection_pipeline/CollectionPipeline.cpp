@@ -88,6 +88,7 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
     mContext.SetIsFirstProcessorJsonFlag(config.mIsFirstProcessorJson);
     mContext.SetHasNativeProcessorsFlag(config.mHasNativeProcessor);
     mContext.SetIsFlushingThroughGoPipelineFlag(config.IsFlushingThroughGoPipelineExisted());
+    mContext.SetGoPipelineBridgeMode(config.GetGoPipelineBridgeMode());
 
     // for special treatment below
     const InputFile* inputFile = nullptr;
