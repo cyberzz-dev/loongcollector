@@ -30,6 +30,7 @@ import (
 	"github.com/alibaba/ilogtail/pkg/protocol/decoder"
 	"github.com/alibaba/ilogtail/pkg/protocol/decoder/common"
 	"github.com/alibaba/ilogtail/pkg/selfmonitor"
+	"github.com/alibaba/ilogtail/pkg/tlscommon"
 )
 
 const (
@@ -37,16 +38,23 @@ const (
 	v2
 )
 
+const (
+	saslTypePlaintext   = sarama.SASLTypePlaintext
+	saslTypeSCRAMSHA256 = sarama.SASLTypeSCRAMSHA256
+	saslTypeSCRAMSHA512 = sarama.SASLTypeSCRAMSHA512
+)
+
 type InputKafka struct {
-	ConsumerGroup string
-	ClientID      string
-	Topics        []string
-	Brokers       []string
-	MaxMessageLen int
-	Version       string
-	Offset        string
-	SASLUsername  string
-	SASLPassword  string
+	ConsumerGroup  string
+	ClientID       string
+	Topics         []string
+	Brokers        []string
+	MaxMessageLen  int
+	Version        string
+	Offset         string
+	SASLUsername   string
+	SASLPassword   string
+	Authentication Authentication
 	// Assignor Consumer group partition assignment strategy (range, roundrobin, sticky)
 	Assignor string
 	// Decoder the decoder to use, default is "ext_default_decoder"
@@ -66,6 +74,33 @@ type InputKafka struct {
 	decoder             extensions.Decoder
 	collectorV1         pipeline.Collector
 	version             int8
+}
+
+type Authentication struct {
+	// PlainText authentication
+	PlainText *PlainTextConfig
+	// SASL authentication
+	SASL *SaslConfig
+	// Sasl keeps compatibility with the historical flusher_kafka_v2 document casing.
+	Sasl *SaslConfig
+	// TLS authentication
+	TLS *tlscommon.TLSConfig
+}
+
+type PlainTextConfig struct {
+	// The username for connecting to Kafka.
+	Username string
+	// The password for connecting to Kafka.
+	Password string
+}
+
+type SaslConfig struct {
+	// SASL Mechanism to be used, possible values are: (PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512)
+	SaslMechanism string
+	// The username for connecting to Kafka.
+	Username string
+	// The password for connecting to Kafka.
+	Password string
 }
 
 const (
@@ -100,51 +135,14 @@ func (k *InputKafka) Init(context pipeline.Context) (int, error) {
 		return 0, err
 	}
 
-	config := sarama.NewConfig()
-
-	if k.Version != "" {
-		if config.Version, err = sarama.ParseKafkaVersion(k.Version); err != nil {
-			return 0, err
-		}
-	}
-	config.Consumer.Return.Errors = true
-
-	if k.SASLUsername != "" && k.SASLPassword != "" {
-		logger.Infof(k.context.GetRuntimeContext(), "Using SASL auth with username '%s',",
-			k.SASLUsername)
-		config.Net.SASL.User = k.SASLUsername
-		config.Net.SASL.Password = k.SASLPassword
-		config.Net.SASL.Enable = true
-	}
-
-	switch strings.ToLower(k.Offset) {
-	case "oldest", "":
-		config.Consumer.Offsets.Initial = sarama.OffsetOldest
-	case "newest":
-		config.Consumer.Offsets.Initial = sarama.OffsetNewest
-	default:
-		logger.Warningf(k.context.GetRuntimeContext(), selfmonitor.InputKafkaAlarm, "Kafka consumer invalid offset '%s', using 'oldest'",
-			k.Offset)
-		config.Consumer.Offsets.Initial = sarama.OffsetOldest
-	}
-
-	switch strings.ToLower(k.Assignor) {
-	case "sticky":
-		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategySticky}
-	case "roundrobin":
-		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategyRoundRobin}
-	case "range":
-		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategyRange}
-	default:
-		logger.Warningf(k.context.GetRuntimeContext(), selfmonitor.InputKafkaAlarm, "Unrecognized consumer group partition assignor '%s', using 'oldest'",
-			k.Assignor)
-		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategyRange}
+	config, err := k.newSaramaConfig()
+	if err != nil {
+		return 0, err
 	}
 
 	newClient, err := sarama.NewClient(k.Brokers, config)
 	if err != nil {
-		logger.Warningf(k.context.GetRuntimeContext(), selfmonitor.InputKafkaAlarm, "Kafka consumer invalid offset '%s', using 'oldest'",
-			k.Offset)
+		logger.Warningf(k.context.GetRuntimeContext(), selfmonitor.InputKafkaAlarm, "failed to create kafka client, error: %v", err)
 		return 0, err
 	}
 	consumerGroup, err := sarama.NewConsumerGroupFromClient(k.ConsumerGroup, newClient)
@@ -183,6 +181,140 @@ func (k *InputKafka) Init(context pipeline.Context) (int, error) {
 	}()
 	<-k.ready
 	return 0, nil
+}
+
+func (k *InputKafka) newSaramaConfig() (*sarama.Config, error) {
+	config := sarama.NewConfig()
+	var err error
+	if k.Version != "" {
+		if config.Version, err = sarama.ParseKafkaVersion(k.Version); err != nil {
+			return nil, err
+		}
+	}
+	config.Consumer.Return.Errors = true
+
+	if k.SASLUsername != "" && k.SASLPassword != "" {
+		logger.Infof(k.context.GetRuntimeContext(), "Using SASL auth with username '%s',",
+			k.SASLUsername)
+		config.Net.SASL.User = k.SASLUsername
+		config.Net.SASL.Password = k.SASLPassword
+		config.Net.SASL.Enable = true
+	}
+
+	if err := k.Authentication.ConfigureAuthentication(config); err != nil {
+		return nil, err
+	}
+
+	switch strings.ToLower(k.Offset) {
+	case "oldest", "":
+		config.Consumer.Offsets.Initial = sarama.OffsetOldest
+	case "newest":
+		config.Consumer.Offsets.Initial = sarama.OffsetNewest
+	default:
+		logger.Warningf(k.context.GetRuntimeContext(), selfmonitor.InputKafkaAlarm, "Kafka consumer invalid offset '%s', using 'oldest'",
+			k.Offset)
+		config.Consumer.Offsets.Initial = sarama.OffsetOldest
+	}
+
+	switch strings.ToLower(k.Assignor) {
+	case "sticky":
+		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategySticky}
+	case "roundrobin":
+		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategyRoundRobin}
+	case "range":
+		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategyRange}
+	default:
+		logger.Warningf(k.context.GetRuntimeContext(), selfmonitor.InputKafkaAlarm, "Unrecognized consumer group partition assignor '%s', using 'oldest'",
+			k.Assignor)
+		config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.BalanceStrategyRange}
+	}
+	return config, nil
+}
+
+func (config *Authentication) ConfigureAuthentication(saramaConfig *sarama.Config) error {
+	if config.PlainText != nil {
+		if err := config.PlainText.ConfigurePlaintext(saramaConfig); err != nil {
+			return err
+		}
+	}
+
+	saslConfig := config.SASL
+	if saslConfig == nil {
+		saslConfig = config.Sasl
+	} else if config.Sasl != nil && saslConfig.SaslMechanism == "" {
+		saslConfig.SaslMechanism = config.Sasl.SaslMechanism
+	}
+	if saslConfig != nil {
+		if err := saslConfig.ConfigureSasl(saramaConfig); err != nil {
+			return err
+		}
+	}
+
+	if config.TLS != nil {
+		if err := configureTLS(config.TLS, saramaConfig); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (plainTextConfig *PlainTextConfig) ConfigurePlaintext(saramaConfig *sarama.Config) error {
+	if plainTextConfig.Username != "" && plainTextConfig.Password == "" {
+		return fmt.Errorf("PlainTextConfig password must be set when username is configured")
+	}
+
+	if plainTextConfig.Username != "" {
+		saramaConfig.Net.SASL.Enable = true
+		saramaConfig.Net.SASL.User = plainTextConfig.Username
+		saramaConfig.Net.SASL.Password = plainTextConfig.Password
+	}
+	return nil
+}
+
+func (saslConfig *SaslConfig) ConfigureSasl(saramaConfig *sarama.Config) error {
+	if saslConfig.Username == "" {
+		return fmt.Errorf("username have to be provided")
+	}
+
+	if saslConfig.Password == "" {
+		return fmt.Errorf("password have to be provided")
+	}
+
+	saramaConfig.Net.SASL.Enable = true
+	saramaConfig.Net.SASL.User = saslConfig.Username
+	saramaConfig.Net.SASL.Password = saslConfig.Password
+	switch strings.ToUpper(saslConfig.SaslMechanism) {
+	case "":
+	case saslTypePlaintext:
+		saramaConfig.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+	case saslTypeSCRAMSHA256:
+		saramaConfig.Net.SASL.Handshake = true
+		saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+			return &XDGSCRAMClient{HashGeneratorFcn: SHA256}
+		}
+	case saslTypeSCRAMSHA512:
+		saramaConfig.Net.SASL.Handshake = true
+		saramaConfig.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+		saramaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+			return &XDGSCRAMClient{HashGeneratorFcn: SHA512}
+		}
+	default:
+		return fmt.Errorf("not valid SASL mechanism '%v', only supported with PLAIN|SCRAM-SHA-512|SCRAM-SHA-256", saslConfig.SaslMechanism)
+	}
+	return nil
+}
+
+func configureTLS(config *tlscommon.TLSConfig, saramaConfig *sarama.Config) error {
+	tlsConfig, err := config.LoadTLSConfig()
+	if err != nil {
+		return fmt.Errorf("error loading tls config: %w", err)
+	}
+	if tlsConfig != nil {
+		saramaConfig.Net.TLS.Enable = true
+		saramaConfig.Net.TLS.Config = tlsConfig
+	}
+	return nil
 }
 
 func (k *InputKafka) Description() string {

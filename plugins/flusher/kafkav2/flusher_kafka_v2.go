@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -41,6 +42,8 @@ const (
 	PartitionerTypeRoundRobin = "roundrobin"
 	PartitionerTypeRoundHash  = "hash"
 )
+
+const producerErrorLogSuppressInterval = time.Minute
 
 // msgCheckpointInfo carries the file-checkpoint context for a single Kafka message.
 // It is attached to each sarama.ProducerMessage.Metadata and consumed in the
@@ -130,6 +133,11 @@ type FlusherKafka struct {
 	// checkpoint. It is only used by the V2 (Export) path for file sources.
 	offsets           *flushercheckpoint.Tracker
 	checkpointCommits *flushercheckpoint.Committer
+
+	producerErrorLogMu         sync.Mutex
+	producerErrorLogLastMsg    string
+	producerErrorLogLastTime   time.Time
+	producerErrorLogSuppressed int
 }
 
 type backoffConfig struct {
@@ -285,7 +293,7 @@ func (k *FlusherKafka) Init(context pipeline.Context) error {
 					if info, ok := err.Msg.Metadata.(*msgCheckpointInfo); ok && info != nil {
 						k.offsets.Fail(info.sourceID, info.group)
 					}
-					logger.Warning(k.context.GetRuntimeContext(), selfmonitor.FlusherFlushAlarm, "flush kafka write data fail, error", err)
+					k.logProducerError(err)
 				}
 			case msg := <-success:
 				if msg != nil {
@@ -302,6 +310,45 @@ func (k *FlusherKafka) Init(context pipeline.Context) error {
 	k.producer = producer
 	k.isTerminal = SIGTERM
 	return nil
+}
+
+func (k *FlusherKafka) logProducerError(err error) {
+	shouldLog, suppressed := k.shouldLogProducerError(err)
+	if !shouldLog {
+		return
+	}
+	if suppressed > 0 {
+		logger.Warning(k.context.GetRuntimeContext(),
+			selfmonitor.FlusherFlushAlarm,
+			"flush kafka write data fail, error", err,
+			"suppressed_count", suppressed,
+			"suppressed_interval", producerErrorLogSuppressInterval.String())
+		return
+	}
+	logger.Warning(k.context.GetRuntimeContext(), selfmonitor.FlusherFlushAlarm, "flush kafka write data fail, error", err)
+}
+
+func (k *FlusherKafka) shouldLogProducerError(err error) (bool, int) {
+	k.producerErrorLogMu.Lock()
+	defer k.producerErrorLogMu.Unlock()
+
+	now := time.Now()
+	msg := err.Error()
+	if msg != k.producerErrorLogLastMsg || k.producerErrorLogLastTime.IsZero() {
+		k.producerErrorLogLastMsg = msg
+		k.producerErrorLogLastTime = now
+		k.producerErrorLogSuppressed = 0
+		return true, 0
+	}
+	if now.Sub(k.producerErrorLogLastTime) < producerErrorLogSuppressInterval {
+		k.producerErrorLogSuppressed++
+		return false, 0
+	}
+
+	suppressed := k.producerErrorLogSuppressed
+	k.producerErrorLogLastTime = now
+	k.producerErrorLogSuppressed = 0
+	return true, suppressed
 }
 
 func (k *FlusherKafka) Description() string {

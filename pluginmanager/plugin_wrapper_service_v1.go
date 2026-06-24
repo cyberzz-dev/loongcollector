@@ -38,7 +38,7 @@ func (wrapper *ServiceWrapperV1) Init(pluginMeta *pipeline.PluginMeta) error {
 }
 
 func (wrapper *ServiceWrapperV1) Run(cc *pipeline.AsyncControl) {
-	logger.Info(wrapper.Config.Context.GetRuntimeContext(), "start run service", wrapper.Input)
+	logger.Info(wrapper.Config.Context.GetRuntimeContext(), "start run service", wrapper.Input.Description())
 
 	go func() {
 		defer panicRecover(wrapper.Input.Description())

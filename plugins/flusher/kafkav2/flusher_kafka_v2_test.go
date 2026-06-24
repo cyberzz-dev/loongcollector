@@ -15,6 +15,9 @@
 package kafkav2
 
 import (
+	"errors"
+	"time"
+
 	"github.com/alibaba/ilogtail/pkg/helper"
 	"github.com/alibaba/ilogtail/pkg/models"
 	"github.com/alibaba/ilogtail/pkg/protocol"
@@ -26,6 +29,43 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestShouldLogProducerErrorSuppressesRepeatedErrors(t *testing.T) {
+	k := NewFlusherKafka()
+	err := errors.New("kafka: circuit breaker is open")
+
+	shouldLog, suppressed := k.shouldLogProducerError(err)
+	require.True(t, shouldLog)
+	require.Equal(t, 0, suppressed)
+
+	shouldLog, suppressed = k.shouldLogProducerError(err)
+	require.False(t, shouldLog)
+	require.Equal(t, 0, suppressed)
+
+	shouldLog, suppressed = k.shouldLogProducerError(err)
+	require.False(t, shouldLog)
+	require.Equal(t, 0, suppressed)
+
+	k.producerErrorLogMu.Lock()
+	k.producerErrorLogLastTime = time.Now().Add(-producerErrorLogSuppressInterval - time.Second)
+	k.producerErrorLogMu.Unlock()
+
+	shouldLog, suppressed = k.shouldLogProducerError(err)
+	require.True(t, shouldLog)
+	require.Equal(t, 2, suppressed)
+}
+
+func TestShouldLogProducerErrorDoesNotSuppressDifferentErrors(t *testing.T) {
+	k := NewFlusherKafka()
+
+	shouldLog, suppressed := k.shouldLogProducerError(errors.New("kafka: circuit breaker is open"))
+	require.True(t, shouldLog)
+	require.Equal(t, 0, suppressed)
+
+	shouldLog, suppressed = k.shouldLogProducerError(errors.New("kafka: leader not available"))
+	require.True(t, shouldLog)
+	require.Equal(t, 0, suppressed)
+}
 
 func TestConnectAndWriteFlusherV1(t *testing.T) {
 	if testing.Short() {

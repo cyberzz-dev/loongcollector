@@ -16,16 +16,19 @@ package kafka
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"os/exec"
 	"testing"
 	"time"
 
+	"github.com/IBM/sarama"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/alibaba/ilogtail/pkg/helper"
 	"github.com/alibaba/ilogtail/pkg/protocol"
+	"github.com/alibaba/ilogtail/pkg/tlscommon"
 	pluginmanager "github.com/alibaba/ilogtail/pluginmanager"
 )
 
@@ -55,6 +58,198 @@ func newInput() (*ContextTest, *InputKafka, error) {
 	}
 	_, err := processor.Init(&ctx.ContextImp)
 	return ctx, processor, err
+}
+
+func TestNewSaramaConfigWithTLS(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			TLS: &tlscommon.TLSConfig{
+				Enabled:            true,
+				InsecureSkipVerify: true,
+				MinVersion:         "1.2",
+				MaxVersion:         "1.3",
+			},
+		},
+	}
+
+	config, err := input.newSaramaConfig()
+	require.NoError(t, err)
+	require.True(t, config.Net.TLS.Enable)
+	require.NotNil(t, config.Net.TLS.Config)
+	assert.True(t, config.Net.TLS.Config.InsecureSkipVerify)
+	assert.Equal(t, uint16(tls.VersionTLS12), config.Net.TLS.Config.MinVersion)
+	assert.Equal(t, uint16(tls.VersionTLS13), config.Net.TLS.Config.MaxVersion)
+}
+
+func TestNewSaramaConfigWithTLSDisabled(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			TLS: &tlscommon.TLSConfig{},
+		},
+	}
+
+	config, err := input.newSaramaConfig()
+	require.NoError(t, err)
+	assert.False(t, config.Net.TLS.Enable)
+	assert.Nil(t, config.Net.TLS.Config)
+}
+
+func TestNewSaramaConfigWithInvalidTLS(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			TLS: &tlscommon.TLSConfig{
+				Enabled:  true,
+				CertFile: "client.crt",
+			},
+		},
+	}
+
+	_, err := input.newSaramaConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "either both certificate and key must be supplied")
+}
+
+func TestNewSaramaConfigWithPlainTextAuthentication(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			PlainText: &PlainTextConfig{
+				Username: "user",
+				Password: "pass",
+			},
+		},
+	}
+
+	config, err := input.newSaramaConfig()
+	require.NoError(t, err)
+	assert.True(t, config.Net.SASL.Enable)
+	assert.Equal(t, "user", config.Net.SASL.User)
+	assert.Equal(t, "pass", config.Net.SASL.Password)
+}
+
+func TestNewSaramaConfigWithPlainTextMissingPassword(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			PlainText: &PlainTextConfig{
+				Username: "user",
+			},
+		},
+	}
+
+	_, err := input.newSaramaConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PlainTextConfig password must be set")
+}
+
+func TestNewSaramaConfigWithSASLPlain(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			SASL: &SaslConfig{
+				SaslMechanism: "PLAIN",
+				Username:      "user",
+				Password:      "pass",
+			},
+		},
+	}
+
+	config, err := input.newSaramaConfig()
+	require.NoError(t, err)
+	assert.True(t, config.Net.SASL.Enable)
+	assert.Equal(t, sarama.SASLTypePlaintext, string(config.Net.SASL.Mechanism))
+	assert.Equal(t, "user", config.Net.SASL.User)
+	assert.Equal(t, "pass", config.Net.SASL.Password)
+}
+
+func TestNewSaramaConfigWithSASLSCRAM(t *testing.T) {
+	tests := []struct {
+		name      string
+		mechanism string
+		expected  string
+	}{
+		{
+			name:      "sha256",
+			mechanism: "SCRAM-SHA-256",
+			expected:  sarama.SASLTypeSCRAMSHA256,
+		},
+		{
+			name:      "sha512",
+			mechanism: "SCRAM-SHA-512",
+			expected:  sarama.SASLTypeSCRAMSHA512,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &InputKafka{
+				Offset:   "oldest",
+				Assignor: "range",
+				Authentication: Authentication{
+					SASL: &SaslConfig{
+						SaslMechanism: tt.mechanism,
+						Username:      "user",
+						Password:      "pass",
+					},
+				},
+			}
+
+			config, err := input.newSaramaConfig()
+			require.NoError(t, err)
+			assert.True(t, config.Net.SASL.Enable)
+			assert.True(t, config.Net.SASL.Handshake)
+			assert.Equal(t, tt.expected, string(config.Net.SASL.Mechanism))
+			require.NotNil(t, config.Net.SASL.SCRAMClientGeneratorFunc)
+		})
+	}
+}
+
+func TestNewSaramaConfigWithSASLMechanismAlias(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			SASL: &SaslConfig{
+				Username: "user",
+				Password: "pass",
+			},
+			Sasl: &SaslConfig{
+				SaslMechanism: "SCRAM-SHA-256",
+			},
+		},
+	}
+
+	config, err := input.newSaramaConfig()
+	require.NoError(t, err)
+	assert.Equal(t, sarama.SASLTypeSCRAMSHA256, string(config.Net.SASL.Mechanism))
+	require.NotNil(t, config.Net.SASL.SCRAMClientGeneratorFunc)
+}
+
+func TestNewSaramaConfigWithInvalidSASL(t *testing.T) {
+	input := &InputKafka{
+		Offset:   "oldest",
+		Assignor: "range",
+		Authentication: Authentication{
+			SASL: &SaslConfig{
+				SaslMechanism: "SCRAM-SHA-1",
+				Username:      "user",
+				Password:      "pass",
+			},
+		},
+	}
+
+	_, err := input.newSaramaConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not valid SASL mechanism")
 }
 
 type mockLog struct {

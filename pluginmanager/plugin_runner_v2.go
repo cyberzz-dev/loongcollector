@@ -221,7 +221,7 @@ func (p *pluginv2Runner) runInput() {
 	for _, input := range p.ServicePlugins {
 		service := input
 		p.InputControl.Run(func(c *pipeline.AsyncControl) {
-			logger.Info(p.LogstoreConfig.Context.GetRuntimeContext(), "start run service", service)
+			logger.Info(p.LogstoreConfig.Context.GetRuntimeContext(), "start run service", service.Input.Description())
 			defer panicRecover(service.Input.Description())
 			if err := service.StartService(p.InputPipeContext); err != nil {
 				logger.Error(p.LogstoreConfig.Context.GetRuntimeContext(), selfmonitor.PluginAlarm, "start service error, err", err)
